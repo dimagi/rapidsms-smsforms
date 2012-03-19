@@ -1,0 +1,5 @@
+An alternative XForms application for RapidSMS.
+
+Uses touchforms and the JavaRosa backend to play forms.
+
+For more information on the backend see: https://github.com/dimagi/touchforms
