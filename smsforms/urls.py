@@ -1,8 +1,8 @@
 from django.conf.urls.defaults import *
-from aremind.apps.smstouchforms import views
+from smsforms import views
 
 
 urlpatterns = patterns('',
-    url(r'^edit/$', views.edit_triggers, name='edit-triggers'),
-    url(r'^view/$', views.view_triggers, name='view-triggers'),
+    url(r'^edit/(?P<trigger_id>\d+)$', views.edit_triggers, name='smsforms_edit-triggers'),
+    url(r'^view/$', views.view_triggers, name='smsforms_view-triggers'),
     )
