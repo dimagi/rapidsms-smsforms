@@ -1,0 +1,24 @@
+{% extends "aremind/layout.html" %}
+
+{% block javascripts %}
+    {{ block.super }}
+{% endblock %}
+
+{% block stylesheets %}
+    {{ block.super }}
+{#		<link type="text/css" rel="stylesheet" href="{{ STATIC_URL }}broadcast/css/broadcast.css" />#}
+{% endblock %}
+
+{% block content %}
+<div class="module">
+    <h2>{% if form.instance.pk %}Edit XForm SMS Trigger{% else %}Create XForm SMS Trigger{% endif %}</h2>
+    <form action="#" method="POST">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class='form-action'>
+            <input type='button' name='cancel' value='Cancel' />
+            <input type='submit' name='submit' value="Save" />
+        </div>
+    </form>
+</div>
+{% endblock %}

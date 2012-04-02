@@ -22,7 +22,7 @@ def edit_triggers(request, trigger_id=None):
             else:
                 info = 'Decision Trigger succesfully created'
             messages.info(request, info)
-            return HttpResponseRedirect(reverse('broadcast-schedule'))
+            return HttpResponseRedirect(reverse('smsforms_view-triggers'))
     else:
         form = DTForm(instance=trigger)
     context = {

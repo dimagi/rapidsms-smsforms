@@ -1,4 +1,7 @@
 from django import forms
+from models import DecisionTrigger
 
 class DecisionTriggerForm(forms.ModelForm):
-    pass
+    class Meta(object):
+        model = DecisionTrigger
+
