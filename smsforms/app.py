@@ -44,7 +44,7 @@ class TouchFormsApp(AppBase):
             return None
 
     def create_session_and_save(self, msg, trigger):
-        session = XFormsSession(start_time=datetime.now(), modified_time=datetime.now(), connection=msg.connection, ended=False, trigger=trigger)
+        session = XFormsSession(start_time=datetime.utcnow(), modified_time=datetime.utcnow(), connection=msg.connection, ended=False, trigger=trigger)
         session.save()
         return session
 
@@ -59,7 +59,7 @@ class TouchFormsApp(AppBase):
         def _next(xformsresponse, message, session):
             # if there's a valid session id (typically on a new form)
             # update our mapping
-            session.modified_time = datetime.now()
+            session.modified_time = datetime.utcnow()
             session.save()
             if xformsresponse.event.type == "question":
                 # send the next question
@@ -70,7 +70,7 @@ class TouchFormsApp(AppBase):
                     return _next(response, message, session)
                 return True
             elif xformsresponse.event.type == "form-complete":
-                session.end_time = datetime.now()
+                session.end_time = datetime.utcnow()
                 session.ended = True
                 session.save()
                 return True

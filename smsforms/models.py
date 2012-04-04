@@ -16,6 +16,7 @@ class XFormsSession(models.Model):
     ended = models.BooleanField(default=False, help_text="Has this session ended?")
     trigger = models.ForeignKey(DecisionTrigger, help_text="The trigger keyword+form that triggered this session")
 
-
+    def __unicode__(self):
+        return 'Session:: Phone Number:%s, Start Time: %s, End Time: %s, Ended?: %s' % (self.connection.identity, self.start_time, self.end_time, self.ended)
 
 
