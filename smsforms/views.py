@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404, render_to_response
 from django.template.context import RequestContext
 from smsforms.forms import DecisionTriggerForm as DTForm
 from smsforms.models import DecisionTrigger
+from touchforms.formplayer.models import XForm
 
 
 def edit_triggers(request, trigger_id=None):
@@ -37,4 +38,16 @@ def view_triggers(request):
         'triggers': DecisionTrigger.objects.all()
     }
     return render_to_response('smsforms/view_triggers.html', context,
+                              RequestContext(request))
+
+
+def create_form(request, form_id=None):
+    if form_id:
+        xform = get_object_or_404(XForm, id=xform_id)
+    else:
+        xform = None
+    context = {
+        'xform' : xform,
+    }
+    return render_to_response('smsforms/create_form.html', context,
                               RequestContext(request))
