@@ -1,4 +1,6 @@
 from django import forms
+from smsforms.models import DecisionTrigger
 
 class DecisionTriggerForm(forms.ModelForm):
-    pass
+    class Meta:
+        model = DecisionTrigger
