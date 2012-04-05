@@ -4,8 +4,8 @@ from django.core.urlresolvers import reverse
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render_to_response
 from django.template.context import RequestContext
-from aremind.apps.smstouchforms.forms import DecisionTriggerForm as DTForm
-from aremind.apps.smstouchforms.models import DecisionTrigger
+from .forms import DecisionTriggerForm as DTForm
+from .models import DecisionTrigger
 
 
 def edit_triggers(request, trigger_id=None):

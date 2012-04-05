@@ -1,5 +1,5 @@
 from django.conf.urls.defaults import *
-from aremind.apps.smstouchforms import views
+from . import views
 
 
 urlpatterns = patterns('',
