@@ -1,61 +1,59 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+{% extends "aremind/layout.html" %}
+    {% block stylesheets %}
+        {{ block.super }}
+        <link href="/formdesigner/css/smoothness/jquery-ui-1.8.14.custom.css" type="text/css" rel="stylesheet" />
+{#        <link href="/formdesigner/css/screen.css" rel="stylesheet" type="text/css" media="screen, projection" />#}
+        <link href="/formdesigner/css/chosen.css" rel="stylesheet" type="text/css" />
+        <link rel="stylesheet" href="/formdesigner/css/jquery.fancybox-1.3.4.css" type="text/css" media="screen" />
+        <link href="/formdesigner/css/formdesigner.css" rel="stylesheet" type="text/css" media="screen, projection" />
+    {% endblock %}
 
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
-
-  <head>
-        <title>Dimagi XForms FormDesigner</title>
-
-        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-
-        <link href="{{ STATIC_URL }}formdesigner/css/smoothness/jquery-ui-1.8.14.custom.css" type="text/css" rel="stylesheet" />
-        <!--<link href="css/screen.css" rel="stylesheet" type="text/css" media="screen, projection" />-->
-         <link href="{{ STATIC_URL }}formdesigner/css/bootstrap.css" rel="stylesheet" type="text/css" media="screen, projection" />
-        <!--<link href="css/print.css" rel="stylesheet" type="text/css" media="print" />-->
-        <link href="{{ STATIC_URL }}formdesigner/css/chosen.css" rel="stylesheet" type="text/css" />
-        <link rel="stylesheet" href="{{ STATIC_URL }}css/jquery.fancybox-1.3.4.css" type="text/css" media="screen" />
-        <link href="{{ STATIC_URL }}formdesigner/css/formdesigner.css" rel="stylesheet" type="text/css" media="screen, projection" />
-
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/jquery-1.6.1.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/jquery-ui-1.8.14.custom.min.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/jquery.jstree.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/jquery.fancybox-1.3.4.pack.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/chosen.jquery.min.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/jquery-ui-timepicker-addon.js"></script>
-
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/lib/xpath/lib/biginteger.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/lib/xpath/lib/schemeNumber.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/lib/xpath/models.js"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/lib/xpath/xpath.js"></script>
-
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/XMLWriter-1.0.0.js"></script>
-
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/saveButton.js?version=101"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/ui.js?version=101"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/util.js?version=101"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/model.js?version=101"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/controller.js?version=101"></script>
-        <script type="text/javascript" src="{{ STATIC_URL }}formdesigner/js/widgets.js?version=101"></script>
+    {% block javascripts %}
+        {{ block.super }}
+        <script type="text/javascript" src="/formdesigner/js/jquery-1.6.1.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/jquery-ui-1.8.14.custom.min.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/jquery.jstree.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/jquery.fancybox-1.3.4.pack.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/chosen.jquery.min.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/jquery-ui-timepicker-addon.js"></script>
+        <script type="text/javascript" src="/formdesigner/lib/xpath/lib/biginteger.js"></script>
+        <script type="text/javascript" src="/formdesigner/lib/xpath/lib/schemeNumber.js"></script>
+        <script type="text/javascript" src="/formdesigner/lib/xpath/models.js"></script>
+        <script type="text/javascript" src="/formdesigner/lib/xpath/xpath.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/XMLWriter-1.0.0.js"></script>
+        <script type="text/javascript" src="/formdesigner/js/saveButton.js?version=101"></script>
+        <script type="text/javascript" src="/formdesigner/js/ui.js?version=101"></script>
+        <script type="text/javascript" src="/formdesigner/js/util.js?version=101"></script>
+        <script type="text/javascript" src="/formdesigner/js/model.js?version=101"></script>
+        <script type="text/javascript" src="/formdesigner/js/controller.js?version=101"></script>
+        <script type="text/javascript" src="/formdesigner/js/widgets.js?version=101"></script>
         <script type="text/javascript">
             $(function() {
-                $("#formdesigner button").addClass("btn");
+                $("#/formdesigner button").addClass("btn");
             });
         </script>
-  </head>
-  <body>
-    <div id="formdesigner"></div>
-    <script type="text/javascript">
-    $(document).ready(function () {
-           formdesigner.launch({
-               rootElement: "#formdesigner",
-               staticPrefix: "",
-               langs: "",
-               forms: {{ xform }},
-               saveUrl: "/touchforms",
-               CSRF_TOKEN: {{ csrf_token }}
-        });
-    });
+    {% endblock %}
 
-    </script>
-</body>
-</html>
+    {% block content %}
+        <div class="module">
+            <h2>Formdesigner</h2>
+            <br />
+            <h3>{% if xform %}Edit{% else %}Create{% endif %} your XForm here.  When done, make sure to click Save!</h3>
+        </div>
+        <div class="hq-oldstyle">
+            <div id="formdesigner"></div>
+            <script type="text/javascript">
+            $(document).ready(function () {
+                   formdesigner.launch({
+                       rootElement: "#formdesigner",
+                       staticPrefix: "/formdesigner/",
+                       langs: "",
+                       form: '{% if xform_data %}{{ xform_data }}{% else %}{% endif %}',
+                       saveUrl: "/touchforms/{{ xform.id }}",
+                       CSRF_TOKEN: "{{ csrf_token }}",
+                       iconUrl: "http://localhost:8000/formdesigner/css/smoothness/images/ui-icons_888888_256x240.png"
+                });
+            });
+            </script>
+        </div>
+    {% endblock %}

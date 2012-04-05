@@ -11,7 +11,6 @@
 {% endblock %}
 
 {% block content %}
-
 <div class="module">
     <h2>Decision Tree Triggers</h2>
     <table id='triggers-table'>
@@ -19,7 +18,7 @@
             <tr>
                 <th>Trigger</th>
                 <th>Form</th>
-                <th>Edit</th>
+                <th>Action</th>
             </tr>
         </thead>
         <tbody>
@@ -27,13 +26,14 @@
             <tr>
                 <td><a href="{% url smsforms_edit-triggers trigger.id %}">{{ trigger.trigger_keyword }}</a></td>
                 <td>{{ trigger.xform }}</td>
-                <td><a href="{% url smsforms_edit-triggers trigger.id %}">Edit Trigger</a></td>
+                <td><a href="{% url smsforms_edit-triggers trigger.id %}">Editr</a> <a href="{% url smsforms_delete-triggers trigger.id %}">Delete</a></td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     <br />
-    <a href="{% url smsforms_create-trigger %}" id="smsforms_create_trigger_button">Create New Trigger</a>
+    <a href="{% url smsforms_create-trigger %}" id="smsforms_create_trigger_button" class="buttons">Create New Trigger</a>
+
 </div>
 
 {% endblock %}
