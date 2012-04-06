@@ -5,12 +5,6 @@ from datetime import datetime
 from touchforms.formplayer import api
 from smsforms.signals import form_complete
 
-TRIGGER_KEYWORDS = {
-    'fadama': '3',
-    'health': '4',
-    }
-
-
 class TouchFormsApp(AppBase):
 
     @property
