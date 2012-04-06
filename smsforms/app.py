@@ -3,8 +3,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from models import XFormsSession, DecisionTrigger
 from datetime import datetime
 from touchforms.formplayer import api
-from touchforms.formplayer.models import XForm
-import pprint
+from smsforms.signals import form_complete
 
 TRIGGER_KEYWORDS = {
     'fadama': '3',
@@ -23,7 +22,8 @@ class TouchFormsApp(AppBase):
 
     def get_trigger_keyword(self, msg):
         """
-        Scans the argument message for a trigger keyword (specified by the DecisionTrigger Model) and returns that keyword if found, else None.
+        Scans the argument message for a trigger keyword (specified by the 
+        DecisionTrigger Model) and returns that keyword if found, else None.
         """
         if not len(msg.text):
             return None
@@ -73,9 +73,10 @@ class TouchFormsApp(AppBase):
                 session.end_time = datetime.utcnow()
                 session.ended = True
                 session.save()
+                form_complete.send(sender="smsforms", session=session,
+                                   form=xformsresponse.event.output)
                 return True
 
-        new_session = False
         response = None
 
         #check if this Connection is in a form session:
@@ -95,7 +96,6 @@ class TouchFormsApp(AppBase):
         elif trigger and not session:
             session = self.create_session_and_save(msg, trigger)
             form = trigger.xform
-            new_session = True
             response = api.start_form_session(form.file.path)
             session.session_id = response.session_id
             session.save()
