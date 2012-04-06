@@ -1,6 +1,5 @@
 from django.conf.urls.defaults import *
 from smsforms import views
-from django.conf import settings
 
 
 urlpatterns = patterns('',

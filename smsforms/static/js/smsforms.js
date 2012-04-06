@@ -1,3 +1,5 @@
 $(document).ready(function() {
-    $('.buttons').button();
+    $('a.button').button({text: false});
+    $('a.button.add').button("option", "icons", {primary: 'ui-icon-circle-plus'});
+    $('a.button.add').button("option", "text", true);
 });

@@ -1,4 +1,4 @@
-{% extends "aremind/layout.html" %}
+{% extends "smsforms/base.html" %}
 
 {% block javascripts %}
     {{ block.super }}
@@ -26,13 +26,13 @@
             <tr>
                 <td><a href="{% url smsforms_edit-triggers trigger.id %}">{{ trigger.trigger_keyword }}</a></td>
                 <td>{{ trigger.xform }}</td>
-                <td><a href="{% url smsforms_edit-triggers trigger.id %}">Editr</a> <a href="{% url smsforms_delete-triggers trigger.id %}">Delete</a></td>
+                <td><a href="{% url smsforms_edit-triggers trigger.id %}">Edit</a> <a href="{% url smsforms_delete-triggers trigger.id %}">Delete</a></td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     <br />
-    <a href="{% url smsforms_create-trigger %}" id="smsforms_create_trigger_button" class="buttons">Create New Trigger</a>
+    <a href="{% url smsforms_create-trigger %}" id="smsforms_create_trigger_button" class="button add">Create New Trigger</a>
 
 </div>
 
