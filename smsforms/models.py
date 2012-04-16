@@ -1,6 +1,7 @@
 from django.db import models
 from rapidsms.models import Connection
 from touchforms.formplayer.models import XForm
+from datetime import datetime
 
 class DecisionTrigger(models.Model):
     xform = models.ForeignKey(XForm)
@@ -19,4 +20,10 @@ class XFormsSession(models.Model):
     def __unicode__(self):
         return 'Session:: Phone Number:%s, Start Time: %s, End Time: %s, Ended?: %s' % (self.connection.identity, self.start_time, self.end_time, self.ended)
 
-
+    def end(self):
+        now = datetime.utcnow()
+        self.end_time = now
+        self.modified_time = now
+        self.ended = True
+        self.save()
+        

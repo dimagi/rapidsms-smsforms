@@ -31,7 +31,7 @@ class TouchFormsApp(AppBase):
             session = XFormsSession.objects.get(connection=msg.connection, ended=False)
             self.debug('Found existing session! %s' % session)
             return session
-        except ObjectDoesNotExist:
+        except XFormsSession.DoesNotExist:
             return None
 
     def create_session_and_save(self, msg, trigger):
@@ -83,6 +83,9 @@ class TouchFormsApp(AppBase):
             
         trigger = _match_to_whole_form(msg)
         if trigger:
+            # close any existing sessions
+            _close_open_sessions(msg.connection)
+            
             # start the form session
             session, response = self._start_session(msg, trigger)
             for answer in _break_into_answers(msg):
@@ -100,6 +103,10 @@ class TouchFormsApp(AppBase):
             else:
                 msg.respond("Incomplete form! The first unanswered question is '%s'." % 
                             response.event.text_prompt)
+                # for now, manually end the session to avoid
+                # confusing the session-based engine
+                session.end()
+                
             return True
     
     def _try_process_as_session_form(self, msg):
@@ -118,8 +125,7 @@ class TouchFormsApp(AppBase):
         elif trigger and session:
             # mark old session as 'done' and follow process for creating a new one
             # TODO: should probably have a way to mark as canceled.
-            session.ended = True
-            session.save()
+            session.end()
             session = None
 
         if session:
@@ -151,8 +157,7 @@ def _tf_format(text):
         return text
 
 def _next(xformsresponse, session):
-    now = datetime.utcnow()
-    session.modified_time = now
+    session.modified_time = datetime.utcnow()
     session.save()
     if xformsresponse.event.type == "question":
         yield xformsresponse
@@ -164,10 +169,12 @@ def _next(xformsresponse, session):
             for additional_resp in _next(response, session):
                 yield additional_resp
     elif xformsresponse.event.type == "form-complete":
-        session.end_time = now
-        session.ended = True
-        session.save()
+        session.end()
         form_complete.send(sender="smsforms", session=session,
                            form=xformsresponse.event.output)
         yield xformsresponse
 
+def _close_open_sessions(connection):
+    sessions = XFormsSession.objects.filter(connection=connection, ended=False)
+    map(lambda session: session.end(), sessions)
+    
