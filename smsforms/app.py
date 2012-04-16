@@ -52,7 +52,8 @@ class TouchFormsApp(AppBase):
         """
         session = self.create_session_and_save(msg, trigger)
         form = trigger.xform
-        response = api.start_form_session(form.file.path)
+        language = msg.contact.language if msg.contact else ""
+        response = api.start_form_session(form.file.path, language=language)
         session.session_id = response.session_id
         session.save()
         return (session, response)
