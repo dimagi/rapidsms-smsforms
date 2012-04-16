@@ -92,6 +92,10 @@ class TouchFormsApp(AppBase):
                 responses = list(_next(response, session))
                 response = api.answer_question(int(session.session_id),
                                                answer)
+                if response.is_error:
+                    msg.respond("Invalid form: %s" % response.text_prompt)
+                    session.end()
+                    return True
             
             # this loop just plays through the last question + any triggers
             # at the end of the form
@@ -102,7 +106,7 @@ class TouchFormsApp(AppBase):
                 msg.respond("%s received. Thanks!" % trigger.trigger_keyword)
             else:
                 msg.respond("Incomplete form! The first unanswered question is '%s'." % 
-                            response.event.text_prompt)
+                            response.text_prompt)
                 # for now, manually end the session to avoid
                 # confusing the session-based engine
                 session.end()
@@ -137,8 +141,8 @@ class TouchFormsApp(AppBase):
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
         for xformsresponse in _next(response, session):
-            if xformsresponse.event.text_prompt:
-                msg.respond(xformsresponse.event.text_prompt)
+            if xformsresponse.text_prompt:
+                msg.respond(xformsresponse.text_prompt)
         return True
     
     def handle(self, msg):
@@ -159,7 +163,9 @@ def _tf_format(text):
 def _next(xformsresponse, session):
     session.modified_time = datetime.utcnow()
     session.save()
-    if xformsresponse.event.type == "question":
+    if xformsresponse.is_error:
+        yield xformsresponse
+    elif xformsresponse.event.type == "question":
         yield xformsresponse
         if xformsresponse.event.datatype == "info":
             # We have to deal with Trigger/Label type messages 
