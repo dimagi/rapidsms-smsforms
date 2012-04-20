@@ -12,4 +12,6 @@ urlpatterns = patterns('',
     url(r'^edit_form/(?P<form_id>\d+)$', views.create_form, name='smsforms_edit-form'),
     url(r'^delete_form/(?P<form_id>\d+)$', views.delete_form, name='smsforms_delete-form'),
     url(r'^list_forms/$', views.list_forms, name='smsforms_list-forms'),
+    url(r'^submit_form/(?P<form_id>\d+)$', views.list_forms, name='smsforms_submit-form'),
+
     )
