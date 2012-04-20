@@ -3,8 +3,9 @@ from django.core.exceptions import ObjectDoesNotExist
 from models import XFormsSession, DecisionTrigger
 from datetime import datetime
 from touchforms.formplayer import api
-from smsforms.signals import form_complete
+from smsforms.signals import form_complete, form_error
 import logging
+from touchforms.formplayer.api import XformsGenericError
 
 logging = logging.getLogger(__name__)
 
@@ -59,7 +60,9 @@ class TouchFormsApp(AppBase):
         response = api.start_form_session(form.file.path, language=language)
         session.session_id = response.session_id
         session.save()
-        return (session, response)
+        if response.status == "http-error":
+            _handle_http_error(response, session)
+        return session, response
         
     def _try_process_as_whole_form(self, msg):
         """
@@ -167,8 +170,7 @@ class TouchFormsApp(AppBase):
             return True
         elif self._try_process_as_session_form(msg):
             return True
-        
-        
+
 def _tf_format(text, response=None):
     """
     Attempts to do validation and formatting of the answer
@@ -207,8 +209,6 @@ def _tf_format(text, response=None):
         else:
             return text, None
 
-
-
 def _next(xformsresponse, session):
     session.modified_time = datetime.utcnow()
     session.save()
@@ -240,4 +240,21 @@ def _respond_and_end(text, msg, session):
     session.end()
     msg.respond(text[:160])
     return True
-    
+
+
+def _handle_http_error(response, session):
+    """
+    Attempts to retrieve whatever partial XForm Instance (raw XML) may exist and posts it to couchforms.
+    Also sets the session.error flag (and session.error_msg).
+    """
+    session.error = True
+    session.error_msg = str(response.error)[:255] #max_length in model
+    session.save()
+    session_id = response.session_id or session.session_id
+    if response.status == 'http-error' and session_id:
+        partial = api.get_raw_instance(session_id)
+        #fire off a the partial using the form-error signal
+        form_error.send(sender="smsforms", session=session,
+                           form=partial)
+
+

@@ -18,6 +18,7 @@ class XFormsSession(models.Model):
     modified_time = models.DateTimeField(blank=True, null=True)
     end_time = models.DateTimeField(blank=True, null=True)
     error_msg = models.CharField(max_length=255, null=True, blank=True, help_text="Error message last received, if any")
+    has_error = models.BooleanField(default=False, help_text="Did this session have an error?")
     ended = models.BooleanField(default=False, help_text="Has this session ended?")
     trigger = models.ForeignKey(DecisionTrigger, help_text="The trigger keyword+form that triggered this session")
     cancelled = models.BooleanField(default=False, help_text="Was this session cancelled (automatically or manually)?")
