@@ -91,7 +91,7 @@ class TouchFormsApp(AppBase):
 
         def _break_into_answers(msg):
             # TODO: brittle and not fully featured
-            return map(lambda ans: _tf_format(ans, fail_hard=False),
+            return map(lambda ans: _tf_format(ans, fail_hard=False)[0],
                        msg.text.strip().split()[1:])
 
         logger.debug('Attempting to process message as WHOLE FORM')
@@ -118,14 +118,20 @@ class TouchFormsApp(AppBase):
 
                 response = api.answer_question(int(session.session_id),
                                                answer)
-                session.last_touchforms_response = json.dumps(response._dict)
-                session.save()
                 if response.error:
                     return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
-
+                session.last_touchforms_response = json.dumps(response._dict)
+                session.save()
                 logger.debug('After answer validation. answer:%s, error_msg: %s, response: %s' % (answer, error_msg, response))
                 if response.is_error or error_msg:
                     return _respond_and_end("Invalid Format for %s" % last_response.text_prompt, msg, session)
+
+                if response.event.type == 'form-complete':
+                    logger.debug('Form completed but their are extra answers. Silently dropping extras!')
+                    logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
+                    #We're done here and the session has been ended (in _next()).
+                    #TODO: Should we return a response to the user warning them there are extras?
+                    break
             
             # this loop just plays through the last question + any triggers
             # at the end of the form
@@ -212,7 +218,7 @@ def _tf_validate_answer(text, response):
         """
         Prepares multi/single select answers for TouchForms.
         """
-        answer_options = text.split() #strip happens automatically
+        answer_options = str(text).split() #strip happens automatically
         choices = map(lambda choice: choice.lower(), response.event.choices)
         logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
         new_answers = copy(answer_options)
@@ -241,7 +247,7 @@ def _tf_validate_answer(text, response):
     logger.debug('_tf_validate_answer:: Datatype is "%s"' % datatype)
     if datatype == 'int':
         return _tf_format(text,fail_hard=True)
-    elif (datatype == 'select' or datatype == 'multiselect') and len(text.strip()): #if length is 0 will drop through to base case.
+    elif (datatype == 'select' or datatype == 'multiselect') and len(str(text).strip()): #if length is 0 will drop through to base case.
         return _validate_selects(text, response)
     else:
         return text, None
