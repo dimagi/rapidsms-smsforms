@@ -1,3 +1,4 @@
+from copy import copy
 import json
 from rapidsms.apps.base import AppBase
 from django.core.exceptions import ObjectDoesNotExist
@@ -183,7 +184,7 @@ class TouchFormsApp(AppBase):
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
-        for xformsresponse in _next(response, session):
+        for xformsresponse in _next(response, session, msg):
             if xformsresponse.error:
                 return _respond_and_end(xformsresponse.error, msg, session)
             if xformsresponse.text_prompt:
@@ -199,39 +200,49 @@ class TouchFormsApp(AppBase):
         elif self._try_process_as_session_form(msg):
             return True
 
-def _tf_validate_answer(text, response=None):
+def _tf_validate_answer(text, response):
     """
     Attempts to do validation and formatting of the answer
     based on the response (if provided).
     If no response is provided will attempt to cast answer as an int. If this fails, returns the answer as is.
     Returns: formatted_answer, error_msg
     """
-    # any additional formatting needs can go here if they come up
+
+    def _validate_selects(text, response):
+        """
+        Prepares multi/single select answers for TouchForms.
+        """
+        answer_options = text.split() #strip happens automatically
+        choices = map(lambda choice: choice.lower(), response.event.choices)
+        logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
+        new_answers = copy(answer_options)
+        for idx, opt in enumerate(answer_options):
+            logger.debug('Trying to format (m)select answer: "%s"' % opt)
+            try: #in the case that we accept numbers to indicate option selection
+                opt_int = int(opt)
+                if not (1 <= opt_int <= len(choices)) and not opt_int in choices: #Edge case!
+                    return text, 'Answer %s must be between 1 and %s' % (opt_int, len(choices))
+                else:
+                    new_answers[idx] = str(opt_int)
+
+            except ValueError: #in the case where we accept the actual text of the question
+                logger.debug('Caught value error, trying to parse answer string choice of: %s' % choices)
+                if opt.lower() not in choices:
+                    return text, 'Answer must be one of the choices'
+                else:
+                    new_answers[idx] = str(choices.index(opt.lower()))
+        return ' '.join(new_answers), None
 
     logger.debug('_tf_validate_answer(%s,%s).' % (text, response))
     if not response:
-        return _tf_format(text)
+        return text, 'Must Provide a XformsResponse object for answer validation!'
 
     datatype = response.event.datatype if response.event else None
     logger.debug('_tf_validate_answer:: Datatype is "%s"' % datatype)
     if datatype == 'int':
         return _tf_format(text,fail_hard=True)
     elif (datatype == 'select' or datatype == 'multiselect') and len(text.strip()): #if length is 0 will drop through to base case.
-        answer_options = text.split() #strip happens automatically
-        choices = map(lambda choice: choice.lower(), response.event.choices)
-        logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
-        for opt in answer_options:
-            logger.debug('Trying to format (m)select answer: "%s"' % opt)
-            try: #in the case that we accept numbers to indicate option selection
-                opt_int = int(opt)
-                if not (1 <= opt_int <= len(choices)) and not opt_int in choices: #Edge case!
-                    return text, 'Answer %s must be between 1 and %s' % (opt_int, len(choices))
-            except ValueError: #in the case where we accept the actual text of the question
-                logger.debug('Caught value error, trying to parse answer string choice of: %s' % choices)
-                if opt.lower() not in choices:
-                    return text, 'Answer must be one of the choices'
-                else:
-                    return choices.index(opt.lower()), None
+        return _validate_selects(text, response)
     else:
         return text, None
 
@@ -243,7 +254,7 @@ def _tf_format(text, fail_hard=False):
         error_msg = 'Answer must be a number!' if fail_hard else None
         return text, error_msg
 
-def _next(xformsresponse, session):
+def _next(xformsresponse, session, msg=None):
     session.modified_time = datetime.utcnow()
     session.save()
     if xformsresponse.is_error:
@@ -258,10 +269,14 @@ def _next(xformsresponse, session):
             for additional_resp in _next(response, session):
                 yield additional_resp
     elif xformsresponse.event.type == "form-complete":
-        session.end()
         logger.debug('Sending FORM_COMPLETE Signal')
         form_complete.send(sender="smsforms", session=session,
                            form=xformsresponse.event.output)
+        if session.trigger.final_response and msg:
+            logger.debug('Found a final response, form has ended so sending it out')
+            _respond_and_end(session.trigger.final_response, msg, session)
+        else:
+            session.end()
         yield xformsresponse
 
 def _close_open_sessions(connection):
