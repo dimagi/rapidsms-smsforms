@@ -27,9 +27,10 @@
                 <th>Name</th>
                 <!--th>Namespace</th-->
                 <th>Created</th>
+                <th>Keyword Triggers</th>
                 <th>Version</th>
                 <th>UI Version</th>
-                <th>File</th>
+                <th colspan="3">Form Action</th>
                 <th colspan="3">Play</th>
             </thead>
             {% endif %}
@@ -43,9 +44,14 @@
 {#                        </td>#}
 {#                    {% endif %}#}
                     <td>{{ xform.created }}</td>
+                    <td>{% for trigger in xform.decisiontrigger_set.all %}[<b>{{ trigger.trigger_keyword }}</b>] {% endfor %}</td>
                     <td>{{ xform.version }}</td>
                     <td>{{ xform.uiversion }}</td>
-                    <td><a href="{% url xform_download xform.id %}">download</a>,<a href="{% url smsforms_edit-form xform.id %}">edit</a>,<a href="{% url smsforms_delete-form xform.id %}">delete</a></td>
+
+                    <td><a href="{% url xform_download xform.id %}">download</a></td>
+                    <td><a href="{% url smsforms_edit-form xform.id %}">edit</a></td>
+                    <td><a href="{% url smsforms_delete-form xform.id %}">delete</a></td>
+
                     <td><a href="{% url xform_play xform.id %}">touch</a></td>
                     <td><a href="{% url xform_play_kb xform.id %}">type</a></td>
                     <td><a href="{% url xform_play_all xform.id %}">full</a></td>

@@ -1,3 +1,4 @@
+import json
 from rapidsms.apps.base import AppBase
 from django.core.exceptions import ObjectDoesNotExist
 from models import XFormsSession, DecisionTrigger
@@ -5,11 +6,15 @@ from datetime import datetime
 from touchforms.formplayer import api
 from smsforms.signals import form_complete, form_error
 import logging
-from touchforms.formplayer.api import XformsGenericError
 
-logging = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 
 class TouchFormsApp(AppBase):
+    #overriding because seeing router|mixin is so unhelpful it makes me want to throw my pc out the window.
+    @property
+    def _logger(self):
+        return logging.getLogger(__name__)
 
     @property
     def trigger_keywords(self):
@@ -61,6 +66,7 @@ class TouchFormsApp(AppBase):
         session.session_id = response.session_id
         session.save()
         if response.status == "http-error":
+            #short circuit processing as something is jacked.
             _handle_http_error(response, session)
         return session, response
         
@@ -84,30 +90,39 @@ class TouchFormsApp(AppBase):
 
         def _break_into_answers(msg):
             # TODO: brittle and not fully featured
-            return map(lambda ans: _tf_format(ans)[0],
+            return map(lambda ans: _tf_format(ans, fail_hard=False),
                        msg.text.strip().split()[1:])
 
-        logging.debug('Attempting to process message as WHOLE FORM')
+        logger.debug('Attempting to process message as WHOLE FORM')
         trigger = _match_to_whole_form(msg)
         if trigger:
-            logging.debug('Trigger keyword found, attempting to answer questions...')
+            logger.debug('Trigger keyword found, attempting to answer questions...')
             # close any existing sessions
             _close_open_sessions(msg.connection)
             
             # start the form session
             session, response = self._start_session(msg, trigger)
+            if response.error:
+                return _respond_and_end(response.error, msg, session)
             for answer in _break_into_answers(msg):
                 responses = list(_next(response, session))
                 #get the last touchforms response object so that we can validate our answer
                 #instead of relying on touchforms and getting back a less than useful error.
                 last_response = responses.pop()
-                answer, error_msg = _tf_format(answer, last_response)
+                if last_response.error:
+                    return _respond_and_end(last_respons.error, msg, session)
+                answer, error_msg = _tf_validate_answer(answer, last_response)
                 if error_msg:
                     return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
 
                 response = api.answer_question(int(session.session_id),
                                                answer)
-                logging.debug('After answer validation. answer:%s, error_msg: %s, response: %s' % (answer, error_msg, response))
+                session.last_touchforms_response = json.dumps(response._dict)
+                session.save()
+                if response.error:
+                    return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
+
+                logger.debug('After answer validation. answer:%s, error_msg: %s, response: %s' % (answer, error_msg, response))
                 if response.is_error or error_msg:
                     return _respond_and_end("Invalid Format for %s" % last_response.text_prompt, msg, session)
             
@@ -117,10 +132,10 @@ class TouchFormsApp(AppBase):
                 pass
             
             if session.ended:
-                logging.debug('Session complete and marked as ended. Responding with final_response message...')
+                logger.debug('Session complete and marked as ended. Responding with final_response message...')
                 msg.respond("%s" % trigger.final_response)
             else:
-                logging.debug('Session not finished! Responding with message uncomplete: %s' % response.text_prompt)
+                logger.debug('Session not finished! Responding with message uncomplete: %s' % response.text_prompt)
                 msg.respond("Incomplete form! The first unanswered question is '%s'." % 
                             response.text_prompt)
                 # for now, manually end the session to avoid
@@ -136,33 +151,46 @@ class TouchFormsApp(AppBase):
         
         Returns True if the message matches and was processed.
         """
-        logging.debug('Attempting to process message as SESSION FORM')
+        logger.debug('Attempting to process message as SESSION FORM')
         # check if this connection is in a form session:
         session = self.get_session(msg)
         trigger = self.get_trigger_keyword(msg)
         if not trigger and session is None:
-            logging.debug('Not a session form (no session or trigger kw found')
+            logger.debug('Not a session form (no session or trigger kw found')
             return
         elif trigger and session:
             # mark old session as 'cancelled' and follow process for creating a new one
-            logging.debug('Found trigger kw and stale session. Ending old session and starting fresh.')
+            logger.debug('Found trigger kw and stale session. Ending old session and starting fresh.')
             session.cancel()
             session = None
 
         if session:
-            logging.debug('Found an existing session, attempting to answer question with message content: %s' % msg.text)
-            response = api.answer_question(int(session.session_id),_tf_format(msg.text))
+            logger.debug('Found an existing session, attempting to answer question with message content: %s' % msg.text)
+            last_response = _get_last_response_from_session(session)
+
+            ans, error_msg = _tf_validate_answer(msg.text, last_response) #we need the last response to figure out what question type this is.
+            if error_msg:
+                return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
+            response = api.answer_question(int(session.session_id), ans)
         elif trigger:
-            logging.debug('Found trigger keyword. Starting a new session')
+            logger.debug('Found trigger keyword. Starting a new session')
             session, response = self._start_session(msg, trigger)
+            session.last_touchforms_response = json.dumps(response._dict)
+            session.save()
+            if response.error:
+                return _respond_and_end(response.error, msg, session)
             
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
         for xformsresponse in _next(response, session):
+            if xformsresponse.error:
+                return _respond_and_end(xformsresponse.error, msg, session)
             if xformsresponse.text_prompt:
                 msg.respond(xformsresponse.text_prompt)
-        logging.debug('Completed processing message as part of SESSION FORM')
+            session.last_touchforms_response = json.dumps(xformsresponse._dict)
+            session.save()
+        logger.debug('Completed processing message as part of SESSION FORM')
         return True
     
     def handle(self, msg):
@@ -171,43 +199,49 @@ class TouchFormsApp(AppBase):
         elif self._try_process_as_session_form(msg):
             return True
 
-def _tf_format(text, response=None):
+def _tf_validate_answer(text, response=None):
     """
     Attempts to do validation and formatting of the answer
     based on the response (if provided).
-    If no response is provided will attempt to cast answer as an in. If this fails, returns the answer as is.
+    If no response is provided will attempt to cast answer as an int. If this fails, returns the answer as is.
     Returns: formatted_answer, error_msg
     """
     # any additional formatting needs can go here if they come up
 
-    def make_int(text, fail_hard=False):
-        try:
-            return int(text), None
-        except ValueError:
-            error_msg = 'Answer must be a number!' if fail_hard else None
-            return text, error_msg
-
-    logging.debug('_tf_format(%s,%s).' % (text, response))
+    logger.debug('_tf_validate_answer(%s,%s).' % (text, response))
     if not response:
-        return make_int(text)
+        return _tf_format(text)
+
+    datatype = response.event.datatype if response.event else None
+    logger.debug('_tf_validate_answer:: Datatype is "%s"' % datatype)
+    if datatype == 'int':
+        return _tf_format(text,fail_hard=True)
+    elif (datatype == 'select' or datatype == 'multiselect') and len(text.strip()): #if length is 0 will drop through to base case.
+        answer_options = text.split() #strip happens automatically
+        choices = map(lambda choice: choice.lower(), response.event.choices)
+        logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
+        for opt in answer_options:
+            logger.debug('Trying to format (m)select answer: "%s"' % opt)
+            try: #in the case that we accept numbers to indicate option selection
+                opt_int = int(opt)
+                if not (1 <= opt_int <= len(choices)) and not opt_int in choices: #Edge case!
+                    return text, 'Answer %s must be between 1 and %s' % (opt_int, len(choices))
+            except ValueError: #in the case where we accept the actual text of the question
+                logger.debug('Caught value error, trying to parse answer string choice of: %s' % choices)
+                if opt.lower() not in choices:
+                    return text, 'Answer must be one of the choices'
+                else:
+                    return choices.index(opt.lower()), None
     else:
-        datatype = response.event.datatype if response.event else None
-        logging.debug('tf_format():: Datatype is "%s"' % datatype)
-        if datatype == 'int' or datatype == '1select':
-            return make_int(text,fail_hard=True)
-        elif datatype == 'select' and len(text.strip()): #if length is 0 will drop through to base case.
-            answer_options = text.split() #strip happens automatically
-            for opt in answer_options:
-                choices = response.event.choices
-                try: #in the case that we accept numbers to indicate option selection
-                    opt_int = int(opt)
-                    if not (1 <= opt_int <= len(choices)) and not opt_int in choices: #Edge case!
-                        return text, 'Answer %s must be between 1 and %s' % (opt_int, len(choices))
-                except ValueError: #in the case where we accept the actual text of the question
-                    if opt not in choices:
-                        return text, 'Answer must be one of the choices'
-        else:
-            return text, None
+        return text, None
+
+
+def _tf_format(text, fail_hard=False):
+    try:
+        return int(text), None
+    except ValueError:
+        error_msg = 'Answer must be a number!' if fail_hard else None
+        return text, error_msg
 
 def _next(xformsresponse, session):
     session.modified_time = datetime.utcnow()
@@ -220,12 +254,12 @@ def _next(xformsresponse, session):
             # We have to deal with Trigger/Label type messages 
             # expecting an 'ok' type response. So auto-send that 
             # and move on to the next question.
-            response = api.answer_question(int(session.session_id),_tf_format('ok')[0])
+            response = api.answer_question(int(session.session_id),_tf_validate_answer('ok')[0])
             for additional_resp in _next(response, session):
                 yield additional_resp
     elif xformsresponse.event.type == "form-complete":
         session.end()
-        logging.debug('Sending FORM_COMPLETE Signal')
+        logger.debug('Sending FORM_COMPLETE Signal')
         form_complete.send(sender="smsforms", session=session,
                            form=xformsresponse.event.output)
         yield xformsresponse
@@ -237,22 +271,37 @@ def _close_open_sessions(connection):
 
 def _respond_and_end(text, msg, session):
     # NOTE: We auto trim the text to 160 Chars! SMS Limitations....
+    logger.debug('In _respond_and_end()')
     session.end()
-    msg.respond(text[:160])
+    msg.respond(str(text)[:159])
     return True
 
+def _get_last_response_from_session(session):
+    resp = session.last_touchforms_response
+    try:
+        return api.XformsResponse(json.loads(resp))
+    except TypeError:
+        logger.debug('Could not convert last response (saved in session object) to JSON')
+        return None
 
 def _handle_http_error(response, session):
     """
     Attempts to retrieve whatever partial XForm Instance (raw XML) may exist and posts it to couchforms.
     Also sets the session.error flag (and session.error_msg).
     """
+    logger.error('HTTP ERROR: %(error)s' % response.__dict__)
+    logger.error('--------------------------------------')
+    logger.error('Attempting to get partial XForm instance. Response-status: %s' % response.status)
+    logger.error('--------------------------------------')
     session.error = True
     session.error_msg = str(response.error)[:255] #max_length in model
     session.save()
     session_id = response.session_id or session.session_id
     if response.status == 'http-error' and session_id:
         partial = api.get_raw_instance(session_id)
+        logger.error('--------------------------------------')
+        logger.error('Attempted to get partial XForm instance. Content: %s' % partial)
+        logger.error('--------------------------------------')
         #fire off a the partial using the form-error signal
         form_error.send(sender="smsforms", session=session,
                            form=partial)
