@@ -41,7 +41,7 @@ class TouchFormsApp(AppBase):
             session = XFormsSession.objects.get(connection=msg.connection, ended=False)
             self.debug('Found existing session! %s' % session)
             return session
-        except XFormsSession.DoesNotExist:
+        except ObjectDoesNotExist:
             return None
 
     def create_session_and_save(self, msg, trigger):
@@ -68,7 +68,7 @@ class TouchFormsApp(AppBase):
         session.save()
         if response.status == "http-error":
             #short circuit processing as something is jacked.
-            _handle_http_error(response, session)
+            _handle_xformresponse_error(response, session)
         return session, response
         
     def _try_process_as_whole_form(self, msg):
@@ -96,60 +96,66 @@ class TouchFormsApp(AppBase):
 
         logger.debug('Attempting to process message as WHOLE FORM')
         trigger = _match_to_whole_form(msg)
-        if trigger:
-            logger.debug('Trigger keyword found, attempting to answer questions...')
-            # close any existing sessions
-            _close_open_sessions(msg.connection)
-            
-            # start the form session
-            session, response = self._start_session(msg, trigger)
-            if response.error:
-                return _respond_and_end(response.error, msg, session)
-            for answer in _break_into_answers(msg):
-                responses = list(_next(response, session))
-                #get the last touchforms response object so that we can validate our answer
-                #instead of relying on touchforms and getting back a less than useful error.
-                last_response = responses.pop()
-                if last_response.error:
-                    return _respond_and_end(last_respons.error, msg, session)
-                answer, error_msg = _tf_validate_answer(answer, last_response)
-                if error_msg:
-                    return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
+        if not trigger:
+            return
+        logger.debug('Trigger keyword found, attempting to answer questions...')
 
-                response = api.answer_question(int(session.session_id),
-                                               answer)
-                if response.error:
-                    return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
-                session.last_touchforms_response = json.dumps(response._dict)
-                session.save()
-                logger.debug('After answer validation. answer:%s, error_msg: %s, response: %s' % (answer, error_msg, response))
-                if response.is_error or error_msg:
-                    return _respond_and_end("Invalid Format for %s" % last_response.text_prompt, msg, session)
+        # close any existing sessions
+        _close_open_sessions(msg.connection)
 
-                if response.event.type == 'form-complete':
-                    logger.debug('Form completed but their are extra answers. Silently dropping extras!')
-                    logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
-                    #We're done here and the session has been ended (in _next()).
-                    #TODO: Should we return a response to the user warning them there are extras?
-                    break
-            
-            # this loop just plays through the last question + any triggers
-            # at the end of the form
-            for response in _next(response, session):
-                pass
-            
-            if session.ended:
-                logger.debug('Session complete and marked as ended. Responding with final_response message...')
-                msg.respond("%s" % trigger.final_response)
-            else:
-                logger.debug('Session not finished! Responding with message uncomplete: %s' % response.text_prompt)
-                msg.respond("Incomplete form! The first unanswered question is '%s'." % 
-                            response.text_prompt)
-                # for now, manually end the session to avoid
-                # confusing the session-based engine
-                session.end()
-                
+        # start the form session
+        session, response = self._start_session(msg, trigger)
+        if _handle_xformresponse_error(response, msg, session):
             return True
+
+        _update_last_response(session, response)
+
+        #loop through answers
+        for answer in _break_into_answers(msg):
+            logging.debug('Processing answer: %s' % answer)
+            responses = list(_next(response, session))
+            last_response = responses.pop()                 #get the last touchforms response object so that we can validate our answer
+                                                            #instead of relying on touchforms and getting back a less than useful error.
+            if _handle_xformresponse_error(last_response, msg, session):
+                return True
+            _update_last_response(session, last_response)
+
+            #Attempt to clean and validate given answer before sending to TF
+            answer, validation_error_msg = _tf_validate_answer(answer, last_response)
+            if validation_error_msg:
+                return _respond_and_end("%s for \"%s\"" % (validation_error_msg, last_response.text_prompt), msg, session)
+
+            #Actually answer the question (send to TF)
+            response = api.answer_question(int(session.session_id),answer)
+            if _handle_xformresponse_error(response, msg, session, answer):
+                return True
+
+            _update_last_response(session, response)
+            if response.event and response.event.type == 'form-complete':
+                logger.debug('Form completed but their are extra answers. Silently dropping extras!')
+                logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
+                #We're done here and the session has been ended (in _next()).
+                #TODO: Should we return a response to the user warning them there are extras?
+                break
+
+        # this loop just plays through the last question + any triggers
+        # at the end of the form
+        for response in _next(response, session):
+            pass
+
+        if session.ended:
+            logger.debug('Session complete and marked as ended. Responding with final_response message...')
+            if trigger.final_response:
+                msg.respond("%s" % trigger.final_response)
+        else:
+            logger.debug('Session not finished! Responding with message uncomplete: %s' % response.text_prompt)
+            msg.respond("Incomplete form! The first unanswered question is '%s'." %
+                        response.text_prompt)
+            # for now, manually end the session to avoid
+            # confusing the session-based engine
+            session.end()
+
+        return True
     
     def _try_process_as_session_form(self, msg):
         """
@@ -174,29 +180,28 @@ class TouchFormsApp(AppBase):
         if session:
             logger.debug('Found an existing session, attempting to answer question with message content: %s' % msg.text)
             last_response = _get_last_response_from_session(session)
-
             ans, error_msg = _tf_validate_answer(msg.text, last_response) #we need the last response to figure out what question type this is.
             if error_msg:
-                return _respond_and_end("%s for %s" % (error_msg, last_response.text_prompt), msg, session)
+                return _respond_and_end("%s for \"%s\"" % (error_msg, last_response.text_prompt), msg, session)
             response = api.answer_question(int(session.session_id), ans)
         elif trigger:
             logger.debug('Found trigger keyword. Starting a new session')
             session, response = self._start_session(msg, trigger)
-            session.last_touchforms_response = json.dumps(response._dict)
-            session.save()
+            _update_last_response(session, response)
             if response.error:
                 return _respond_and_end(response.error, msg, session)
-            
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
         for xformsresponse in _next(response, session, msg):
-            if xformsresponse.error:
-                return _respond_and_end(xformsresponse.error, msg, session)
+            #Take care of all the possible user and server errors that might crop up
+            if _handle_xformresponse_error(xformsresponse, msg, session):
+                return True
+
             if xformsresponse.text_prompt:
                 msg.respond(xformsresponse.text_prompt)
-            session.last_touchforms_response = json.dumps(xformsresponse._dict)
-            session.save()
+            _update_last_response(session, xformsresponse)
+
         logger.debug('Completed processing message as part of SESSION FORM')
         return True
     
@@ -271,7 +276,7 @@ def _next(xformsresponse, session, msg=None):
             # We have to deal with Trigger/Label type messages 
             # expecting an 'ok' type response. So auto-send that 
             # and move on to the next question.
-            response = api.answer_question(int(session.session_id),_tf_validate_answer('ok')[0])
+            response = api.answer_question(int(session.session_id),_tf_validate_answer('ok', response=None)[0])
             for additional_resp in _next(response, session):
                 yield additional_resp
     elif xformsresponse.event.type == "form-complete":
@@ -305,15 +310,13 @@ def _get_last_response_from_session(session):
         logger.debug('Could not convert last response (saved in session object) to JSON')
         return None
 
-def _handle_http_error(response, session):
+def _handle_xformresponse_error(response, msg, session, answer=None):
     """
     Attempts to retrieve whatever partial XForm Instance (raw XML) may exist and posts it to couchforms.
     Also sets the session.error flag (and session.error_msg).
     """
-    logger.error('HTTP ERROR: %(error)s' % response.__dict__)
-    logger.error('--------------------------------------')
-    logger.error('Attempting to get partial XForm instance. Response-status: %s' % response.status)
-    logger.error('--------------------------------------')
+    if not response.error:
+        return
     session.error = True
     session.error_msg = str(response.error)[:255] #max_length in model
     session.save()
@@ -321,10 +324,27 @@ def _handle_http_error(response, session):
     if response.status == 'http-error' and session_id:
         partial = api.get_raw_instance(session_id)
         logger.error('--------------------------------------')
-        logger.error('Attempted to get partial XForm instance. Content: %s' % partial)
+        logger.error('HTTP ERROR. Attempted to get partial XForm instance. Content: %s' % partial)
         logger.error('--------------------------------------')
-        #fire off a the partial using the form-error signal
-        form_error.send(sender="smsforms", session=session,
-                           form=partial)
+        if partial:
+            #fire off a the partial using the form-error signal
+            form_error.send(sender="smsforms", session=session,form=unicode(partial).strip())
+        return _respond_and_end('There was a server error. Please try again later', msg, session)
+
+    elif response.status == 'validation-error' and session:
+        logger.debug('Handling Validation Error')
+        last_response = _get_last_response_from_session(session)
+        if last_response.event and last_response.event.text_prompt:
+            if answer:
+                ret_msg = '%s:"%s" in "%s"' % (response.error, answer, last_response.event.text_prompt)
+            else:
+                ret_msg = '%s for "%s"' % (response.error, last_response.event.text_prompt)
+        else:
+            ret_msg = response.error
+        return _respond_and_end(ret_msg, msg, session)
 
 
+def _update_last_response(session, response):
+    str_response = json.dumps(response._dict)
+    session.last_touchforms_response = str_response
+    session.save()
