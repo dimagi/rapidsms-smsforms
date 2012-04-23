@@ -143,10 +143,11 @@ class TouchFormsApp(AppBase):
 
         ##### WARNING: This is very hacked together to allow for an optional last question
         last_response = response
-        for last_response in _next(last_response, session):
-            last_response = api.answer_question(session.session_id, '')
-            session.last_touchforms_response = last_response
-            session.save()
+        if not last_response.event.type == 'form-complete':
+            for last_response in _next(last_response, session):
+                last_response = api.answer_question(session.session_id, '')
+                session.last_touchforms_response = last_response
+                session.save()
 
         if last_response.event and last_response.event.type == 'form-complete':
             last_response = _next(last_response, session).next() #do it one last time to trigger form-complete signal sending.
