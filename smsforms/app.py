@@ -68,7 +68,7 @@ class TouchFormsApp(AppBase):
         session.save()
         if response.status == "http-error":
             #short circuit processing as something is jacked.
-            _handle_xformresponse_error(response, session)
+            _handle_xformresponse_error(response, msg, session)
         return session, response
         
     def _try_process_as_whole_form(self, msg):
@@ -140,15 +140,22 @@ class TouchFormsApp(AppBase):
 
         # this loop just plays through the last question + any triggers
         # at the end of the form
-        for response in _next(response, session):
-            pass
 
-        if session.ended:
-            logger.debug('Session complete and marked as ended. Responding with final_response message...')
-            if trigger.final_response:
-                msg.respond("%s" % trigger.final_response)
-        else:
-            logger.debug('Session not finished! Responding with message uncomplete: %s' % response.text_prompt)
+        ##### WARNING: This is very hacked together to allow for an optional last question
+        last_response = response
+        for last_response in _next(last_response, session):
+            last_response = api.answer_question(session.session_id, '')
+            session.last_touchforms_response = last_response
+            session.save()
+
+        if last_response.event and last_response.event.type == 'form-complete':
+            last_response = _next(last_response, session).next() #do it one last time to trigger form-complete signal sending.
+            session.end()
+
+        #######################
+
+        if not session.ended:
+            logger.debug('Session not finished! Responding with message incomplete: %s' % response.text_prompt)
             msg.respond("Incomplete form! The first unanswered question is '%s'." %
                         response.text_prompt)
             # for now, manually end the session to avoid
