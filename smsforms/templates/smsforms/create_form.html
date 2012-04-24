@@ -51,7 +51,7 @@
                        form: '{% if xform_data %}{{ xform_data }}{% else %}{% endif %}',
                        saveUrl: "{% if xform.id %}{% url smsforms_submit-form xform.id %}{% else %}{% url smsforms_create-form %}{% endif %}",
                        CSRF_TOKEN: "{{ csrf_token }}",
-                       iconUrl: "http://localhost:8000/formdesigner/css/smoothness/images/ui-icons_888888_256x240.png"
+                       iconUrl: "/formdesigner/css/smoothness/images/ui-icons_888888_256x240.png"
                 });
             });
             </script>
