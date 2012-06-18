@@ -2,16 +2,42 @@ from copy import copy
 import json
 from rapidsms.apps.base import AppBase
 from django.core.exceptions import ObjectDoesNotExist
-from models import XFormsSession, DecisionTrigger
+from .models import XFormsSession, DecisionTrigger
 from datetime import datetime
 from touchforms.formplayer import api
+from touchforms.formplayer import sms as tfsms
 from smsforms.signals import form_complete, form_error
 import logging
+from touchforms.formplayer.api import XFormsConfig
+
+_ = lambda s: s
 
 logger = logging.getLogger(__name__)
 
+class SessionRouterCache():
+    """
+    This is pretty ghetto. In order to manage different routers and allow
+    tests to pass we need a global way to get the right router that triggered
+    a message, so use this cache object.
+    """
+    cache = {}
+    
+    def set(self, session_id, router):
+        session_id = int(session_id)
+        self.cache[session_id] = router
+        
+    def get(self, session_id):
+        session_id = int(session_id)
+        if session_id not in self.cache:
+            raise ValueError("No router value found for session %s" % session_id)
+        return self.cache[session_id]
+
+# see above
+router_factory = SessionRouterCache()
+    
 class TouchFormsApp(AppBase):
-    #overriding because seeing router|mixin is so unhelpful it makes me want to throw my pc out the window.
+        
+    # overriding because seeing router|mixin is not helpful 
     @property
     def _logger(self):
         return logging.getLogger(__name__)
@@ -43,14 +69,8 @@ class TouchFormsApp(AppBase):
         except ObjectDoesNotExist:
             return None
 
-    def create_session_and_save(self, msg, trigger):
-        now = datetime.utcnow()
-        session = XFormsSession(start_time=now, modified_time=now, 
-                                connection=msg.connection, ended=False, 
-                                trigger=trigger)
-        session.save()
-        return session
-
+    
+        
     def _start_session(self, msg, trigger):
         """
         Starts a new touchforms session. Creates the session object in the db
@@ -59,16 +79,23 @@ class TouchFormsApp(AppBase):
         Returns a tuple of the session and the touchforms response to the first
         triggering of the form.
         """
-        session = self.create_session_and_save(msg, trigger)
         form = trigger.xform
         language = msg.contact.language if msg.contact else ""
-        response = api.start_form_session(form.file.path, language=language)
-        session.session_id = response.session_id
+        now = datetime.utcnow()
+        
+        # start session in touchforms
+        config = XFormsConfig(form_path=form.file.path, 
+                              language=language)
+        session_id, responses = tfsms.start_session(config)
+        
+        # save session in our data models
+        session = XFormsSession(start_time=now, modified_time=now, 
+                                session_id=session_id,
+                                connection=msg.connection, ended=False, 
+                                trigger=trigger)
         session.save()
-        if response.status == "http-error":
-            #short circuit processing as something is jacked.
-            _handle_xformresponse_error(response, msg, session, self.router)
-        return session, response
+        router_factory.set(session_id, self.router)
+        return session, responses
         
     def _try_process_as_whole_form(self, msg):
         """
@@ -79,14 +106,14 @@ class TouchFormsApp(AppBase):
         def _match_to_whole_form(msg):
             # for short term, the syntax for whole forms is any message with
             # more than one word in it. First word is taken as keyword and
-            # the rest as answers instead of just the keyword (for interactive form entry).
-            # This should be smarter, later.
+            # the rest as answers instead of just the keyword (for interactive
+            # form entry). This should be smarter, later.
             text = msg.text.strip()
             if text:
                 words = text.strip().split()
-                if len(words) <= 1:
-                    return None
-                return self.get_trigger_keyword(msg)
+                if len(words) > 1:
+                    return self.get_trigger_keyword(msg)
+            return None
 
         def _break_into_answers(msg):
             # TODO: brittle and not fully featured
@@ -103,35 +130,36 @@ class TouchFormsApp(AppBase):
         _close_open_sessions(msg.connection)
 
         # start the form session
-        session, response = self._start_session(msg, trigger)
-        if _handle_xformresponse_error(response, msg, session, self.router):
+        session, responses = self._start_session(msg, trigger)
+        assert len(responses) > 0, "there should be at least 1 response"
+        if responses[0].is_error:
+            # if the initial session fails, just close the session immediately
+            # and return the error
+            session.end()
+            msg.respond(responses.error)
             return True
-
-        _update_last_response(session, response)
-
-        #loop through answers
-        for answer in _break_into_answers(msg):
+        
+        # loop through answers
+        current_question = list(responses)[-1]
+        answers = _break_into_answers(msg)
+        for i, answer in enumerate(answers):
             logging.debug('Processing answer: %s' % answer)
-            responses = list(_next(response, session, self.router, msg))
-            last_response = responses.pop()                 #get the last touchforms response object so that we can validate our answer
-                                                            #instead of relying on touchforms and getting back a less than useful error.
-            if _handle_xformresponse_error(last_response, msg, session, self.router):
-                return True
-            _update_last_response(session, last_response)
-
-            #Attempt to clean and validate given answer before sending to TF
-            answer, validation_error_msg = _tf_validate_answer(answer, last_response)
+            
+            # Attempt to clean and validate given answer before sending to TF
+            answer, validation_error_msg = _pre_validate_answer(answer, current_question)
             if validation_error_msg:
-                return _respond_and_end("%s for \"%s\"" % (validation_error_msg, last_response.text_prompt), msg, session)
+                return _respond_and_end("%s for \"%s\"" % (validation_error_msg, current_question.text_prompt), msg, session)
 
-            #Actually answer the question (send to TF)
-            response = api.answer_question(int(session.session_id),answer)
-            if _handle_xformresponse_error(response, msg, session, answer, self.router):
+            responses = tfsms.next_responses(int(session.session_id), answer)
+            current_question = list(responses)[-1]               
+            # get the last touchforms response object so that we can validate our answer
+            # instead of relying on touchforms and getting back a less than useful error.
+            if _handle_xformresponse_error(current_question, msg, session, self.router):
                 return True
-
-            _update_last_response(session, response)
-            if response.event and response.event.type == 'form-complete':
-                logger.debug('Form completed but their are extra answers. Silently dropping extras!')
+            
+            if i+1 != len(answers) and current_question.event and \
+                        current_question.event.type == 'form-complete':
+                logger.debug('Form completed but their are extra answers. Silently dropping extras! %s' % (", ".join(answers[i-1:])))
                 logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
                 #We're done here and the session has been ended (in _next()).
                 #TODO: Should we return a response to the user warning them there are extras?
@@ -141,23 +169,24 @@ class TouchFormsApp(AppBase):
         # at the end of the form
 
         ##### WARNING: This is very hacked together to allow for an optional last question
-        last_response = response
-        if not last_response.event.type == 'form-complete':
-            for last_response in _next(last_response, session, self.router, msg):
-                last_response = api.answer_question(session.session_id, '')
-                session.last_touchforms_response = last_response
-                session.save()
-
-        if last_response.event and last_response.event.type == 'form-complete':
-            last_response = _next(last_response, session, self.router, msg).next() #do it one last time to trigger form-complete signal sending.
-            session.end()
-
-        #######################
-
+        
+        # TODO: add optional last question support back if desired
+        
+#        if not current_question.event.type == 'form-complete':
+#            for current_question in _next(current_question, session, self.router, msg):
+#                last_response = api.answer_question(session.session_id, '')
+#                session.save()
+#
+#        if last_response.event and last_response.event.type == 'form-complete':
+#            last_response = _next(last_response, session, self.router, msg).next() 
+#            # do it one last time to trigger form-complete signal sending.
+#            session.end()
+        
+        session = XFormsSession.objects.get(pk=session.pk)
         if not session.ended:
-            logger.debug('Session not finished! Responding with message incomplete: %s' % response.text_prompt)
+            logger.debug('Session not finished! Responding with message incomplete: %s' % current_question.text_prompt)
             msg.respond("Incomplete form! The first unanswered question is '%s'." %
-                        response.text_prompt)
+                        current_question.text_prompt)
             # for now, manually end the session to avoid
             # confusing the session-based engine
             session.end()
@@ -186,29 +215,24 @@ class TouchFormsApp(AppBase):
 
         if session:
             logger.debug('Found an existing session, attempting to answer question with message content: %s' % msg.text)
-            last_response = _get_last_response_from_session(session)
-            ans, error_msg = _tf_validate_answer(msg.text, last_response) #we need the last response to figure out what question type this is.
+            last_response = api.current_question(int(session.session_id))
+            ans, error_msg = _pre_validate_answer(msg.text, last_response) 
+            # we need the last response to figure out what question type this is.
             if error_msg:
-                return _respond_and_end("%s for \"%s\"" % (error_msg, last_response.text_prompt), msg, session)
-            response = api.answer_question(int(session.session_id), ans)
+                msg.respond("%s for \"%s\"" % (error_msg, last_response.text_prompt))
+                return True             
+            
+            responses = tfsms.next_responses(int(session.session_id), ans, auth=None)
+            
+        
         elif trigger:
             logger.debug('Found trigger keyword. Starting a new session')
-            session, response = self._start_session(msg, trigger)
-            _update_last_response(session, response)
-            if response.error:
-                return _respond_and_end(response.error, msg, session)
+            session, responses = self._start_session(msg, trigger)
+        
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
-        for xformsresponse in _next(response, session, self.router, msg):
-            #Take care of all the possible user and server errors that might crop up
-            if _handle_xformresponse_error(xformsresponse, msg, session, self.router):
-                return True
-
-            if xformsresponse.text_prompt:
-                msg.respond(xformsresponse.text_prompt)
-            _update_last_response(session, xformsresponse)
-
+        [msg.respond(resp.text_prompt) for resp in responses if resp.text_prompt]
         logger.debug('Completed processing message as part of SESSION FORM')
         return True
     
@@ -218,11 +242,14 @@ class TouchFormsApp(AppBase):
         elif self._try_process_as_session_form(msg):
             return True
 
-def _tf_validate_answer(text, response):
+def _pre_validate_answer(text, response):
     """
-    Attempts to do validation and formatting of the answer
-    based on the response (if provided).
-    If no response is provided will attempt to cast answer as an int. If this fails, returns the answer as is.
+    Attempts to do validation and formatting of the answer based on the 
+    response (if provided).
+    
+    If no response is provided will attempt to cast answer as an int. 
+    If this fails, returns the answer as is.
+    
     Returns: formatted_answer, error_msg
     """
 
@@ -230,20 +257,22 @@ def _tf_validate_answer(text, response):
         """
         Prepares multi/single select answers for TouchForms.
         """
-        answer_options = str(text).split() #strip happens automatically
+        answer_options = str(text).split()
         choices = map(lambda choice: choice.lower(), response.event.choices)
         logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
         new_answers = copy(answer_options)
         for idx, opt in enumerate(answer_options):
             logger.debug('Trying to format (m)select answer: "%s"' % opt)
-            try: #in the case that we accept numbers to indicate option selection
+            try: 
+                #in the case that we accept numbers to indicate option selection
                 opt_int = int(opt)
-                if not (1 <= opt_int <= len(choices)) and not opt_int in choices: #Edge case!
+                if not (1 <= opt_int <= len(choices)): 
                     return text, 'Answer %s must be between 1 and %s' % (opt_int, len(choices))
                 else:
                     new_answers[idx] = str(opt_int)
 
-            except ValueError: #in the case where we accept the actual text of the question
+            except ValueError: 
+                # in the case where we accept the actual text of the question
                 logger.debug('Caught value error, trying to parse answer string choice of: %s' % choices)
                 if opt.lower() not in choices:
                     return text, 'Answer must be one of the choices'
@@ -251,12 +280,11 @@ def _tf_validate_answer(text, response):
                     new_answers[idx] = str(choices.index(opt.lower()))
         return ' '.join(new_answers), None
 
-    logger.debug('_tf_validate_answer(%s,%s).' % (text, response))
     if not response:
         return text, 'Must Provide a XformsResponse object for answer validation!'
 
     datatype = response.event.datatype if response.event else None
-    logger.debug('_tf_validate_answer:: Datatype is "%s"' % datatype)
+    logger.debug('_pre_validate_answer:: Datatype is "%s"' % datatype)
     if datatype == 'int':
         return _tf_format(text,fail_hard=True)
     elif (datatype == 'select' or datatype == 'multiselect') and len(str(text).strip()): #if length is 0 will drop through to base case.
@@ -271,31 +299,6 @@ def _tf_format(text, fail_hard=False):
     except ValueError:
         error_msg = 'Answer must be a number!' if fail_hard else None
         return text, error_msg
-
-def _next(xformsresponse, session, router, msg=None):
-    session.modified_time = datetime.utcnow()
-    session.save()
-    if xformsresponse.is_error:
-        yield xformsresponse
-    elif xformsresponse.event.type == "question":
-        yield xformsresponse
-        if xformsresponse.event.datatype == "info":
-            # We have to deal with Trigger/Label type messages 
-            # expecting an 'ok' type response. So auto-send that 
-            # and move on to the next question.
-            response = api.answer_question(int(session.session_id),_tf_validate_answer('ok', response=None)[0])
-            for additional_resp in _next(response, session, router, msg):
-                yield additional_resp
-    elif xformsresponse.event.type == "form-complete":
-        logger.debug('Sending FORM_COMPLETE Signal')
-        form_complete.send(sender="smsforms", session=session,
-                           form=xformsresponse.event.output, router=router)
-        if session.trigger.final_response and msg:
-            logger.debug('Found a final response, form has ended so sending it out')
-            _respond_and_end(session.trigger.final_response, msg, session)
-        else:
-            session.end()
-        yield xformsresponse
 
 def _close_open_sessions(connection):
     sessions = XFormsSession.objects.filter(connection=connection, ended=False)
@@ -319,25 +322,30 @@ def _get_last_response_from_session(session):
 
 def _handle_xformresponse_error(response, msg, session, router, answer=None):
     """
-    Attempts to retrieve whatever partial XForm Instance (raw XML) may exist and posts it to couchforms.
+    Attempts to retrieve whatever partial XForm Instance (raw XML) may exist 
+    and posts it to couchforms.
+    
     Also sets the session.error flag (and session.error_msg).
     """
-    if not response.error:
+    if not response.is_error:
         return
     session.error = True
     session.error_msg = str(response.error)[:255] #max_length in model
     session.save()
     session_id = response.session_id or session.session_id
-    if response.status == 'http-error' and session_id:
-        partial = api.get_raw_instance(session_id)
-        logger.error('--------------------------------------')
-        logger.error('HTTP ERROR. Attempted to get partial XForm instance. Content: %s' % partial)
-        logger.error('--------------------------------------')
-        if partial:
-            #fire off a the partial using the form-error signal
-            form_error.send(sender="smsforms", session=session,form=unicode(partial).strip(), router=router)
-        return _respond_and_end('There was a server error. Please try again later', msg, session)
-
+    if response.status == 'http-error':
+        # TODO: translate / customize
+        err_resp = _("There was a server error. Please try again later")
+        if session_id:
+            partial = api.get_raw_instance(session_id)
+            logger.error('HTTP ERROR. Attempted to get partial XForm instance. Content: %s' % partial)
+            if partial:
+                # fire off a the partial using the form-error signal
+                form_error.send(sender="smsforms", session=session,form=unicode(partial).strip(), router=router)
+            return _respond_and_end(err_resp, msg, session)
+        else:
+            msg.respond(err_resp)
+            return True
     elif response.status == 'validation-error' and session:
         logger.debug('Handling Validation Error')
         last_response = _get_last_response_from_session(session)
@@ -349,9 +357,3 @@ def _handle_xformresponse_error(response, msg, session, router, answer=None):
         else:
             ret_msg = response.error
         return _respond_and_end(ret_msg, msg, session)
-
-
-def _update_last_response(session, response):
-    str_response = json.dumps(response._dict)
-    session.last_touchforms_response = str_response
-    session.save()

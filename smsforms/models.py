@@ -22,8 +22,7 @@ class XFormsSession(models.Model):
     ended = models.BooleanField(default=False, help_text="Has this session ended?")
     trigger = models.ForeignKey(DecisionTrigger, help_text="The trigger keyword+form that triggered this session")
     cancelled = models.BooleanField(default=False, help_text="Was this session cancelled (automatically or manually)?")
-    last_touchforms_response = models.TextField(null=True, blank=True, help_text="Raw JSON of last response from TouchForms api.")
-
+    
     def __unicode__(self):
         return 'Session:: Phone Number:%s, Start Time: %s, End Time: %s, Ended?: %s' % (self.connection.identity, self.start_time, self.end_time, self.ended)
 
