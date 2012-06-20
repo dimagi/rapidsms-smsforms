@@ -120,12 +120,10 @@ class TouchFormsApp(AppBase):
             return map(lambda ans: _tf_format(ans)[0],
                        msg.text.strip().split()[1:])
 
-        logger.debug('Attempting to process message as WHOLE FORM')
         trigger = _match_to_whole_form(msg)
         if not trigger:
             return
-        logger.debug('Trigger keyword found, attempting to answer questions...')
-
+        
         # close any existing sessions
         _close_open_sessions(msg.connection)
 
@@ -152,6 +150,7 @@ class TouchFormsApp(AppBase):
 
             responses = tfsms.next_responses(int(session.session_id), answer)
             current_question = list(responses)[-1]               
+            
             # get the last touchforms response object so that we can validate our answer
             # instead of relying on touchforms and getting back a less than useful error.
             if _handle_xformresponse_error(current_question, msg, session, self.router):
@@ -161,13 +160,27 @@ class TouchFormsApp(AppBase):
                         current_question.event.type == 'form-complete':
                 logger.debug('Form completed but their are extra answers. Silently dropping extras! %s' % (", ".join(answers[i-1:])))
                 logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
-                #We're done here and the session has been ended (in _next()).
-                #TODO: Should we return a response to the user warning them there are extras?
+                # We're done here and the session has been ended (in _next()).
+                # TODO: Should we return a response to the user warning them there are extras?
                 break
 
-        # this loop just plays through the last question + any triggers
-        # at the end of the form
-
+        # play through the remaining questions at the end of the form
+        # and if they are all optional, answer them with blanks and 
+        # finish.
+        session = XFormsSession.objects.get(pk=session.pk)
+        if not session.ended: # and trigger.allow_incomplete:
+            while not session.ended and responses:
+                responses = tfsms.next_responses(int(session.session_id), "")
+                current_question = list(responses)[-1]               
+                
+                # if any of the remaining items complain about an empty
+                # answer, send the response
+                if _handle_xformresponse_error(current_question, msg, session, self.router):
+                    return True
+                
+                session = XFormsSession.objects.get(pk=session.pk)
+            
+            
         ##### WARNING: This is very hacked together to allow for an optional last question
         
         # TODO: add optional last question support back if desired
