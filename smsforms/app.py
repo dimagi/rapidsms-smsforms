@@ -180,21 +180,6 @@ class TouchFormsApp(AppBase):
                 
                 session = XFormsSession.objects.get(pk=session.pk)
             
-            
-        ##### WARNING: This is very hacked together to allow for an optional last question
-        
-        # TODO: add optional last question support back if desired
-        
-#        if not current_question.event.type == 'form-complete':
-#            for current_question in _next(current_question, session, self.router, msg):
-#                last_response = api.answer_question(session.session_id, '')
-#                session.save()
-#
-#        if last_response.event and last_response.event.type == 'form-complete':
-#            last_response = _next(last_response, session, self.router, msg).next() 
-#            # do it one last time to trigger form-complete signal sending.
-#            session.end()
-        
         session = XFormsSession.objects.get(pk=session.pk)
         if not session.ended:
             logger.debug('Session not finished! Responding with message incomplete: %s' % current_question.text_prompt)
@@ -290,7 +275,7 @@ def _pre_validate_answer(text, response):
                 if opt.lower() not in choices:
                     return text, 'Answer must be one of the choices'
                 else:
-                    new_answers[idx] = str(choices.index(opt.lower()))
+                    new_answers[idx] = str(choices.index(opt.lower()) + 1)
         return ' '.join(new_answers), None
 
     if not response:
