@@ -310,14 +310,6 @@ def _respond_and_end(text, msg, session):
     msg.respond(str(text)[:159])
     return True
 
-def _get_last_response_from_session(session):
-    resp = session.last_touchforms_response
-    try:
-        return api.XformsResponse(json.loads(resp))
-    except TypeError:
-        logger.debug('Could not convert last response (saved in session object) to JSON')
-        return None
-
 def _handle_xformresponse_error(response, msg, session, router, answer=None):
     """
     Attempts to retrieve whatever partial XForm Instance (raw XML) may exist 
@@ -346,7 +338,7 @@ def _handle_xformresponse_error(response, msg, session, router, answer=None):
             return True
     elif response.status == 'validation-error' and session:
         logger.debug('Handling Validation Error')
-        last_response = _get_last_response_from_session(session)
+        last_response = api.current_question(int(session.session_id))
         if last_response.event and last_response.event.text_prompt:
             if answer:
                 ret_msg = '%s:"%s" in "%s"' % (response.error, answer, last_response.event.text_prompt)
