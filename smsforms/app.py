@@ -1,14 +1,15 @@
 from copy import copy
-import json
 from rapidsms.apps.base import AppBase
 from django.core.exceptions import ObjectDoesNotExist
 from .models import XFormsSession, DecisionTrigger
 from datetime import datetime
 from touchforms.formplayer import api
 from touchforms.formplayer import sms as tfsms
-from smsforms.signals import form_complete, form_error
+from smsforms.signals import form_error
 import logging
 from touchforms.formplayer.api import XFormsConfig
+from rapidsms.conf import settings
+import re
 
 _ = lambda s: s
 
@@ -118,7 +119,7 @@ class TouchFormsApp(AppBase):
         def _break_into_answers(msg):
             # TODO: brittle and not fully featured
             return map(lambda ans: _tf_format(ans)[0],
-                       msg.text.strip().split()[1:])
+                       re.split(settings.ANSWER_DELIMITER_RE, msg.text.strip())[1:])
 
         trigger = _match_to_whole_form(msg)
         if not trigger:
@@ -255,7 +256,7 @@ def _pre_validate_answer(text, response):
         """
         Prepares multi/single select answers for TouchForms.
         """
-        answer_options = str(text).split()
+        answer_options = re.split(settings.MULTISELECT_DELIMITER_RE, str(text))
         choices = map(lambda choice: choice.lower(), response.event.choices)
         logger.debug('Question (%s) answer choices are: %s, given answers: %s' % (datatype, choices, answer_options))
         new_answers = copy(answer_options)
