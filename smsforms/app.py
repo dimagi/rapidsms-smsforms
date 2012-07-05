@@ -7,7 +7,7 @@ from touchforms.formplayer import api
 from touchforms.formplayer import sms as tfsms
 from smsforms.signals import form_error
 import logging
-from touchforms.formplayer.api import XFormsConfig
+from touchforms.formplayer.api import XFormsConfig, select_to_text_vals_only
 from rapidsms.conf import settings
 import re
 
@@ -15,6 +15,11 @@ _ = lambda s: s
 
 logger = logging.getLogger(__name__)
 
+text_prompt_func = select_to_text_vals_only
+def _prompt(q):
+    return q.event.get_text_prompt(text_prompt_func) \
+        if q.event else q.text_prompt
+                
 class SessionRouterCache():
     """
     This is pretty ghetto. In order to manage different routers and allow
@@ -155,7 +160,9 @@ class TouchFormsApp(AppBase):
             # Attempt to clean and validate given answer before sending to TF
             answer, validation_error_msg = _pre_validate_answer(answer, current_question)
             if validation_error_msg:
-                return _respond_and_end("%s for \"%s\"" % (validation_error_msg, current_question.text_prompt), msg, session)
+                return _respond_and_end("%s for \"%s\"" % (validation_error_msg, 
+                                                           _prompt(current_question)),
+                                                           msg, session)
 
             responses = tfsms.next_responses(int(session.session_id), answer)
             current_question = list(responses)[-1]               
@@ -191,9 +198,8 @@ class TouchFormsApp(AppBase):
             
         session = XFormsSession.objects.get(pk=session.pk)
         if not session.ended:
-            logger.debug('Session not finished! Responding with message incomplete: %s' % current_question.text_prompt)
             msg.respond("Incomplete form! The first unanswered question is '%s'." %
-                        current_question.text_prompt)
+                        _prompt(current_question))
             # for now, manually end the session to avoid
             # confusing the session-based engine
             session.end()
@@ -226,7 +232,7 @@ class TouchFormsApp(AppBase):
             ans, error_msg = _pre_validate_answer(msg.text, last_response) 
             # we need the last response to figure out what question type this is.
             if error_msg:
-                msg.respond("%s for \"%s\"" % (error_msg, last_response.text_prompt))
+                msg.respond("%s for \"%s\"" % (error_msg, _prompt(last_response)))
                 return True             
             
             responses = tfsms.next_responses(int(session.session_id), ans, auth=None)
@@ -239,7 +245,7 @@ class TouchFormsApp(AppBase):
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
-        [msg.respond(resp.text_prompt) for resp in responses if resp.text_prompt]
+        [msg.respond(_prompt(resp)) for resp in responses if resp.text_prompt]
         logger.debug('Completed processing message as part of SESSION FORM')
         return True
     
@@ -350,9 +356,11 @@ def _handle_xformresponse_error(response, msg, session, router, answer=None):
         last_response = api.current_question(int(session.session_id))
         if last_response.event and last_response.event.text_prompt:
             if answer:
-                ret_msg = '%s:"%s" in "%s"' % (response.error, answer, last_response.event.text_prompt)
+                ret_msg = '%s:"%s" in "%s"' % (response.error, answer, 
+                                               _prompt(last_response))
             else:
-                ret_msg = '%s for "%s"' % (response.error, last_response.event.text_prompt)
+                ret_msg = '%s for "%s"' % (response.error, 
+                                           _prompt(last_response))
         else:
             ret_msg = response.error
         return _respond_and_end(ret_msg, msg, session)
