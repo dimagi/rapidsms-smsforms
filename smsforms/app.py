@@ -87,7 +87,15 @@ class TouchFormsApp(AppBase):
         # start session in touchforms
         config = XFormsConfig(form_path=form.file.path, 
                               language=language)
-        session_id, responses = tfsms.start_session(config)
+        try:
+            session_id, responses = tfsms.start_session(config)
+        except Exception:
+            # this is super ghetto, but currently touchforms fails
+            # hard if it can't find the language. So as a fallback just
+            # try without specifying. If this failed for any other 
+            # reason it will just fail again.
+            config.language = ""
+            session_id, responses = tfsms.start_session(config)
         
         # save session in our data models
         session = XFormsSession(start_time=now, modified_time=now, 
