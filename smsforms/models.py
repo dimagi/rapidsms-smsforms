@@ -2,6 +2,7 @@ from django.db import models
 from rapidsms.models import Connection
 from touchforms.formplayer.models import XForm
 from datetime import datetime
+import json
 
 class DecisionTrigger(models.Model):
     """
@@ -18,6 +19,14 @@ class DecisionTrigger(models.Model):
                          help_text="The response to be sent when a form is "
                                    "succesfully submitted. Leave blank for "
                                    "forms intended for decisiontree purposes.")
+
+    context_data = models.TextField(null=True, blank=True,
+                                    help_text="Context data to pass to form session (as raw json)")
+
+    @property
+    def context(self):
+        return json.loads(self.context_data) if self.context_data else {}
+
 
 class XFormsSession(models.Model):
     connection = models.ForeignKey(Connection, related_name='xform_sessions')

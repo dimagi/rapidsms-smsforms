@@ -86,12 +86,14 @@ class TouchFormsApp(AppBase):
         triggering of the form.
         """
         form = trigger.xform
-        language = msg.contact.language if msg.contact else ""
+        context = trigger.context
+        language = context.get('_lang') or (msg.contact.language if msg.contact else None)
         now = datetime.utcnow()
         
         # start session in touchforms
         config = XFormsConfig(form_path=form.file.path, 
-                              language=language)
+                              language=language,
+                              session_data=context)
         try:
             session_id, responses = tfsms.start_session(config)
         except Exception:
