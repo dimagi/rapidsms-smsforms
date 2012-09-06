@@ -29,11 +29,9 @@ class SessionRouterCache():
     cache = {}
     
     def set(self, session_id, router):
-        session_id = int(session_id)
         self.cache[session_id] = router
         
     def get(self, session_id):
-        session_id = int(session_id)
         if session_id not in self.cache:
             raise ValueError("No router value found for session %s" % session_id)
         return self.cache[session_id]
@@ -166,7 +164,7 @@ class TouchFormsApp(AppBase):
                                                            _prompt(current_question)),
                                                            msg, session)
 
-            responses = tfsms.next_responses(int(session.session_id), answer)
+            responses = tfsms.next_responses(session.session_id, answer)
             current_question = list(responses)[-1]               
             
             # get the last touchforms response object so that we can validate our answer
@@ -188,7 +186,7 @@ class TouchFormsApp(AppBase):
         session = XFormsSession.objects.get(pk=session.pk)
         if not session.ended: # and trigger.allow_incomplete:
             while not session.ended and responses:
-                responses = tfsms.next_responses(int(session.session_id), "")
+                responses = tfsms.next_responses(session.session_id, "")
                 current_question = list(responses)[-1]               
                 
                 # if any of the remaining items complain about an empty
@@ -230,14 +228,14 @@ class TouchFormsApp(AppBase):
 
         if session:
             logger.debug('Found an existing session, attempting to answer question with message content: %s' % msg.text)
-            last_response = api.current_question(int(session.session_id))
+            last_response = api.current_question(session.session_id)
             ans, error_msg = _pre_validate_answer(msg.text, last_response) 
             # we need the last response to figure out what question type this is.
             if error_msg:
                 msg.respond("%s for \"%s\"" % (error_msg, _prompt(last_response)))
                 return True             
             
-            responses = tfsms.next_responses(int(session.session_id), ans, auth=None)
+            responses = tfsms.next_responses(session.session_id, ans, auth=None)
             
         
         elif trigger:
@@ -355,7 +353,7 @@ def _handle_xformresponse_error(response, msg, session, router, answer=None):
             return True
     elif response.status == 'validation-error' and session:
         logger.debug('Handling Validation Error')
-        last_response = api.current_question(int(session.session_id))
+        last_response = api.current_question(session.session_id)
         if last_response.event and last_response.event.text_prompt:
             if answer:
                 ret_msg = '%s:"%s" in "%s"' % (response.error, answer, 
