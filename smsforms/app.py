@@ -73,7 +73,11 @@ class TouchFormsApp(AppBase):
         except ObjectDoesNotExist:
             return None
 
-    
+    def get_recent_session(self, msg):
+        try:
+            return XFormsSession.objects.filter(connection=msg.connection, ended=True).order_by('-end_time')[0]
+        except IndexError:
+            return None
         
     def _start_session(self, msg, trigger):
         """
@@ -219,6 +223,16 @@ class TouchFormsApp(AppBase):
         trigger = self.get_trigger_keyword(msg)
         if not trigger and session is None:
             logger.debug('Not a session form (no session or trigger kw found')
+
+            # catch if they reply to the last text from a previous session; we don't
+            # want to send them a confusing error message.
+            recent_sess = self.get_recent_session(msg)
+            lockout = getattr(settings, 'SMSFORMS_POSTSESSION_LOCKOUT')
+            if recent_sess and lockout and datetime.utcnow() < recent_sess.end_time + lockout:
+                # swallow
+                logging.debug('swallowing message due to post-session lockout')
+                return True
+
             return
         elif trigger and session:
             # mark old session as 'cancelled' and follow process for creating a new one
@@ -237,7 +251,6 @@ class TouchFormsApp(AppBase):
             
             responses = tfsms.next_responses(session.session_id, ans, auth=None)
             
-        
         elif trigger:
             logger.debug('Found trigger keyword. Starting a new session')
             session, responses = self._start_session(msg, trigger)
