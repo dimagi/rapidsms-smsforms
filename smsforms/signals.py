@@ -17,8 +17,14 @@ def handle_sms_form_complete(sender, session_id, form, **kwargs):
     from smsforms.app import router_factory
 
     # implicit length assert that i'm sure is not always valid
-    [session] = XFormsSession.objects.filter(session_id=session_id, ended=False)
-    session.end()
+    
+    sessions = XFormsSession.objects.filter(session_id=session_id, ended=False).order_by('-modified_time')
+    # there may be other open sessions so close them all
+    for s in sessions:
+        s.end()
+        
+    # the one we want to process is the most recent one though
+    session = sessions[0]
     # TODO: clean up this router business
     router = router_factory.get(session.session_id)
     form_complete.send(sender="smsforms", session=session,

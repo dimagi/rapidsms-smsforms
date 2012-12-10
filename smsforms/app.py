@@ -152,7 +152,7 @@ class TouchFormsApp(AppBase):
             # if the initial session fails, just close the session immediately
             # and return the error
             session.end()
-            msg.respond(responses.error)
+            msg.respond(responses[0].error)
             return True
         
         # loop through answers
