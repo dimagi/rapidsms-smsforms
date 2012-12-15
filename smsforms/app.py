@@ -229,11 +229,9 @@ class TouchFormsApp(AppBase):
             recent_sess = self.get_recent_session(msg)
             lockout = getattr(settings, 'SMSFORMS_POSTSESSION_LOCKOUT')
             if recent_sess and lockout and datetime.utcnow() < recent_sess.end_time + lockout:
-                # swallow
-                logging.debug('swallowing message due to post-session lockout')
-                return True
-
-            return
+                # if no other handlers handle this message, it will be swallowed (in the default phase)
+                self.swallow = True
+            return False
         elif trigger and session:
             # mark old session as 'cancelled' and follow process for creating a new one
             logger.debug('Found trigger kw and stale session. Ending old session and starting fresh.')
@@ -266,6 +264,11 @@ class TouchFormsApp(AppBase):
         if self._try_process_as_whole_form(msg):
             return True
         elif self._try_process_as_session_form(msg):
+            return True
+
+    def default(self, msg):
+        if getattr(self, 'swallow'):
+            logging.debug('swallowing message due to post-session lockout')
             return True
 
 def _pre_validate_answer(text, response):
