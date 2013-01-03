@@ -2,6 +2,7 @@ from django.db import models
 from rapidsms.contrib.messagelog.models import Message
 from rapidsms.models import Connection
 from touchforms.formplayer.models import XForm
+from touchforms.formplayer import api as tfapi
 from datetime import datetime
 import json
 
@@ -34,6 +35,8 @@ class DecisionTrigger(models.Model):
 
 
 class XFormsSession(models.Model):
+    DEFAULT_SELECT_TEXT_MODE = 'vals_only'
+
     connection = models.ForeignKey(Connection, related_name='xform_sessions')
     session_id = models.CharField(max_length=200, null=True, blank=True)
     start_time = models.DateTimeField(blank=True, null=True)
@@ -44,6 +47,7 @@ class XFormsSession(models.Model):
     ended = models.BooleanField(default=False, help_text="Has this session ended?")
     trigger = models.ForeignKey(DecisionTrigger, help_text="The trigger keyword+form that triggered this session")
     cancelled = models.BooleanField(default=False, help_text="Was this session cancelled (automatically or manually)?")
+    select_text_mode = models.CharField(max_length=50, blank=True, null=True)
     message_outgoing = models.ForeignKey(Message, blank=True, null=True, related_name="message_outgoing",
                                           limit_choices_to={'direction': "O"}
                                           )
@@ -65,3 +69,16 @@ class XFormsSession(models.Model):
         self.end()
         self.cancelled = True
         self.save()
+
+    def _select_text_func(self):
+        return {
+            'compact': tfapi.select_to_text_compact,
+            'vals_only': tfapi.select_to_text_vals_only,
+            'verbose': tfapi.select_to_text_readable,
+            'none': tfapi.select_to_text_caption_only,
+        }[self.select_text_mode or self.DEFAULT_SELECT_TEXT_MODE]
+
+    def question_to_prompt(self, q):
+        return q.event.get_text_prompt(self._select_text_func()) \
+            if q.event else q.text_prompt
+                
