@@ -7,19 +7,16 @@ from touchforms.formplayer import api
 from touchforms.formplayer import sms as tfsms
 from smsforms.signals import form_error
 import logging
-from touchforms.formplayer.api import XFormsConfig, select_to_text_vals_only
+from touchforms.formplayer.api import XFormsConfig
 from rapidsms.conf import settings
 import re
 
 _ = lambda s: s
 
+
+
 logger = logging.getLogger(__name__)
 
-text_prompt_func = select_to_text_vals_only
-def _prompt(q):
-    return q.event.get_text_prompt(text_prompt_func) \
-        if q.event else q.text_prompt
-                
 class SessionRouterCache():
     """
     This is pretty ghetto. In order to manage different routers and allow
@@ -90,6 +87,7 @@ class TouchFormsApp(AppBase):
         form = trigger.xform
         context = trigger.context
         language = context.get('_lang') or (msg.contact.language if msg.contact else None)
+        select_text_mode = context.get('_select_text_mode')
         now = datetime.utcnow()
         
         # start session in touchforms
@@ -110,7 +108,7 @@ class TouchFormsApp(AppBase):
         session = XFormsSession(start_time=now, modified_time=now, 
                                 session_id=session_id,
                                 connection=msg.connection, ended=False, 
-                                trigger=trigger)
+                                trigger=trigger, select_text_mode=select_text_mode)
         session.save()
         router_factory.set(session_id, self.router)
         return session, responses
@@ -165,7 +163,7 @@ class TouchFormsApp(AppBase):
             answer, validation_error_msg = _pre_validate_answer(answer, current_question)
             if validation_error_msg:
                 return _respond_and_end("%s for \"%s\"" % (validation_error_msg, 
-                                                           _prompt(current_question)),
+                                                           session.question_to_prompt(current_question)),
                                                            msg, session)
 
             responses = tfsms.next_responses(session.session_id, answer)
@@ -203,7 +201,7 @@ class TouchFormsApp(AppBase):
         session = XFormsSession.objects.get(pk=session.pk)
         if not session.ended:
             msg.respond("Incomplete form! The first unanswered question is '%s'." %
-                        _prompt(current_question))
+                        session.question_to_prompt(current_question))
             # for now, manually end the session to avoid
             # confusing the session-based engine
             session.end()
@@ -244,7 +242,7 @@ class TouchFormsApp(AppBase):
             ans, error_msg = _pre_validate_answer(msg.text, last_response) 
             # we need the last response to figure out what question type this is.
             if error_msg:
-                msg.respond("%s for \"%s\"" % (error_msg, _prompt(last_response)))
+                msg.respond("%s for \"%s\"" % (error_msg, session.question_to_prompt(last_response)))
                 return True             
             
             responses = tfsms.next_responses(session.session_id, ans, auth=None)
@@ -256,7 +254,7 @@ class TouchFormsApp(AppBase):
         else:
             raise Exception("This is not a legal state. Some of our preconditions failed.")
         
-        [msg.respond(_prompt(resp)) for resp in responses if resp.text_prompt]
+        [msg.respond(session.question_to_prompt(resp)) for resp in responses if resp.text_prompt]
         logger.debug('Completed processing message as part of SESSION FORM')
         return True
     
@@ -373,10 +371,10 @@ def _handle_xformresponse_error(response, msg, session, router, answer=None):
         if last_response.event and last_response.event.text_prompt:
             if answer:
                 ret_msg = '%s:"%s" in "%s"' % (response.error, answer, 
-                                               _prompt(last_response))
+                                               session.question_to_prompt(last_response))
             else:
                 ret_msg = '%s for "%s"' % (response.error, 
-                                           _prompt(last_response))
+                                           session.question_to_prompt(last_response))
         else:
             ret_msg = response.error
         return _respond_and_end(ret_msg, msg, session)
