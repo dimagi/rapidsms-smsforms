@@ -265,7 +265,7 @@ class TouchFormsApp(AppBase):
             return True
 
     def default(self, msg):
-        if getattr(self, 'swallow'):
+        if getattr(self, 'swallow', False):
             logging.debug('swallowing message due to post-session lockout')
             return True
 
