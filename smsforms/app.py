@@ -176,7 +176,7 @@ class TouchFormsApp(AppBase):
             
             if i+1 != len(answers) and current_question.event and \
                         current_question.event.type == 'form-complete':
-                logger.debug('Form completed but their are extra answers. Silently dropping extras! %s' % (", ".join(answers[i-1:])))
+                logger.debug('Form completed but their are extra answers. Silently dropping extras! %s' % (", ".join([str(a) for a in answers[i-1:]])))
                 logger.warn('Silently dropping extra answer on Full Form session! Message:%s, connection: %s' % (msg.text, msg.connection))
                 # We're done here and the session has been ended (in _next()).
                 # TODO: Should we return a response to the user warning them there are extras?
@@ -225,7 +225,9 @@ class TouchFormsApp(AppBase):
             # catch if they reply to the last text from a previous session; we don't
             # want to send them a confusing error message.
             recent_sess = self.get_recent_session(msg)
-            lockout = getattr(settings, 'SMSFORMS_POSTSESSION_LOCKOUT')
+            lockout = settings.SMSFORMS_POSTSESSION_LOCKOUT \
+                if hasattr(settings, 'SMSFORMS_POSTSESSION_LOCKOUT') \
+                else None
             if recent_sess and lockout and datetime.utcnow() < recent_sess.end_time + lockout:
                 # if no other handlers handle this message, it will be swallowed (in the default phase)
                 self.swallow = True
